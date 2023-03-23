@@ -17,25 +17,31 @@ class WaCaiDB {
             val historyBalance = getBalanceHistory(this)
             val tradeInfoMap = getTradList(this, accountMap, outGoMap, incomeMap, historyBalance)
             disConnect(conn)
-            convertToCSV(accountMap, tradeInfoMap, historyBalance)
+            convertToCSV(accountMap, tradeInfoMap)
         }
     }
 
     private fun convertToCSV(
         accountMap: Map<String, AccountInfo>,
-        tradeInfoMap: MutableMap<String, MutableList<TradeInfo>>,
-        historyBalance: MutableMap<String, MutableList<TradeInfo>>
-    ): MutableMap<String, Pair<BigDecimal?, MutableList<TradeInfo>>> {
+        tradeInfoMap: MutableMap<String, MutableList<TradeInfo>>): MutableMap<String, Pair<BigDecimal?, MutableList<TradeInfo>>> {
         val cvsMap = mutableMapOf<String, Pair<BigDecimal?, MutableList<TradeInfo>>>()
         accountMap.filterNot { it.value.isDelete }.forEach { it ->
             val account = it.value.name
             val accountId = it.value.uuid
             val originList = tradeInfoMap[accountId]
-            val balanceList = if (historyBalance.containsKey(accountId)) {
-                originList?.takeLastWhileWithInclusive { !it.isHistory }?.map { BigDecimal(it.amount) }
-            } else {
-                originList?.map { BigDecimal(it.amount) }
+            if (originList != null) {
+                var total = 0.0
+                for(trade in originList) {
+                    if (trade.isHistory) {
+                        val adjustAmount = BigDecimal(trade.amount) - BigDecimal(total)
+                        total = trade.amount
+                        trade.amount = adjustAmount.toDouble()
+                    } else {
+                        total += BigDecimal(trade.amount).toDouble()
+                    }
+                }
             }
+            val balanceList = originList?.map { BigDecimal(it.amount) }
             val balance =
                 balanceList?.fold(BigDecimal.ZERO) { acc, e -> acc + e }.let { it?.setScale(2, RoundingMode.HALF_EVEN) }
             println("account:$account balance:${balance}")
@@ -58,7 +64,7 @@ class WaCaiDB {
         return conn
     }
 
-    fun disConnect(conn: Connection?) {
+    private fun disConnect(conn: Connection?) {
         try {
             conn?.close()
         } catch (ex: SQLException) {
@@ -245,7 +251,7 @@ class WaCaiDB {
             val date = rs.getLong("balancedate")
             val balance = rs.getLong("balance") / 100.0
             val tradeInfo = TradeInfo(
-                accountId = account, tradetype = 6, date = date, amount = balance, isHistory = true
+                accountId = account, tradetype = 6, date = date, amount = balance, isHistory = true, description = "新余额"
             )
             if (balanceHistoryMap.containsKey(account)) {
                 balanceHistoryMap[account]?.add(tradeInfo)
